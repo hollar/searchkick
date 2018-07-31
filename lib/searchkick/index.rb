@@ -65,26 +65,31 @@ module Searchkick
     end
 
     def bulk_delete(records)
-      Searchkick.indexer.queue(records.reject { |r| r.id.blank? }.map { |r| {delete: record_data(r)} })
+      Searchkick.indexer.queue(records.reject { |r| r.id.blank? }.map { |r| bulk_record(r, :delete) })
     end
 
     def bulk_index(records)
-      Searchkick.indexer.queue(records.map { |r| {index: record_data(r).merge(data: search_data(r))} })
+      Searchkick.indexer.queue(records.map { |r| bulk_record(r, :index, search_data(r)) })
     end
     alias_method :import, :bulk_index
 
     def bulk_update(records, method_name)
-      Searchkick.indexer.queue(records.map { |r| {update: record_data(r).merge(data: {doc: search_data(r, method_name)})} })
+      Searchkick.indexer.queue(records.map { |r| bulk_record(r, :update, doc: search_data(r, method_name)) })
     end
 
-    def record_data(r)
-      data = {
-        _index: name,
-        _id: search_id(r),
-        _type: document_type(r)
-      }
-      data[:_routing] = r.search_routing if r.respond_to?(:search_routing)
-      data
+    def bulk_record(r, op, data = nil)
+      {}.tap do |bulk|
+        bulk[op] = {
+          _index: name,
+          _id: search_id(r),
+          _type: document_type(r)
+        }
+        bulk[op][:_routing] = r.search_routing if r.respond_to?(:search_routing)
+        if op == :update && @options[:update_retries].to_i > 0
+          bulk[op][:_retry_on_conflict] = @options[:update_retries].to_i
+        end
+        bulk[op][:data] = data if data.present?
+      end
     end
 
     def retrieve(record)
